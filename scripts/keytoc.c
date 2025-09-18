@@ -23,9 +23,13 @@
 #include <openssl/engine.h>
 #include <openssl/core_names.h>
 #include <openssl/param_build.h>
+#include <openssl/sha.h>
 #include <openssl/store.h>
+#include <openssl/x509.h>
 
 static int dts, standalone;
+static const EVP_MD **fingerprint_mds;
+static int fingerprint_n;
 
 static void enomem_exit(const char *func)
 {
@@ -55,7 +59,7 @@ static int openssl_error(const char *fmt, ...)
  * @key		Returns key object, or NULL on failure
  * @return 0 if ok, -ve on error (in which case *rsap will be set to NULL)
  */
-static int pem_get_pub_key(const char *path, EVP_PKEY **pkey)
+static int pem_get_pub_key(const char *path, EVP_PKEY **pkey, X509 **pcert)
 {
 	EVP_PKEY *key;
 	X509 *cert;
@@ -92,7 +96,11 @@ static int pem_get_pub_key(const char *path, EVP_PKEY **pkey)
 	}
 
 	fclose(f);
-	X509_free(cert);
+
+	if (fingerprint_n)
+		*pcert = cert;
+	else
+		X509_free(cert);
 
 	*pkey = key;
 
@@ -491,7 +499,89 @@ err:
 	return ret ? -EINVAL : 0;
 }
 
-static int gen_key_ecdsa(EVP_PKEY *key, const char *key_name, const char *key_name_c)
+static int gen_key_fingerprint(X509 *cert, const EVP_MD *md, const char *key_name_c)
+{
+	unsigned char fingerprint[EVP_MAX_MD_SIZE];
+	const char *md_name = EVP_MD_get0_name(md);
+	int md_size = EVP_MD_get_size(md);
+	unsigned int md_len;
+	int i, ret;
+
+	if (strcmp(md_name, "MD5") &&
+	    strcmp(md_name, "SHA1") &&
+	    strcmp(md_name, "SHA224") &&
+	    strcmp(md_name, "SHA256") &&
+	    strcmp(md_name, "SHA384") &&
+	    strcmp(md_name, "SHA512")) {
+		fprintf(stderr, "ERROR: Unsupported digest algorithm: %s\n", md_name);
+		return -EOPNOTSUPP;
+	}
+
+	ret = X509_digest(cert, md, fingerprint, &md_len);
+	if (ret != 1) {
+		fprintf(stderr, "Failed to generate certificate fingerprint\n");
+		return -EINVAL;
+	}
+
+	/* Output the fingerprint data array */
+	fprintf(outfilep, "static uint8_t %s_%s_fingerprint[] = {\n\t",
+		key_name_c, md_name);
+
+	for (i = 0; i < md_size; i++) {
+		if (i > 0 && i % 8 == 0)
+			fprintf(outfilep, "\n\t");
+
+		fprintf(outfilep, "0x%02x, ", fingerprint[i]);
+	}
+
+	fprintf(outfilep, "\n};\n\n");
+	return 0;
+}
+
+static int gen_key_fingerprints(X509 *cert, const char *key_name_c)
+{
+	const char *md_name;
+	int i, ret;
+
+	if (dts) {
+		fprintf(stderr, "ERROR: dts bindings for cert fingerprints are not defined\n");
+		return -EOPNOTSUPP;
+	}
+
+	if (!fingerprint_n)
+		return 0;
+
+	fputc('\n', outfilep);
+
+	for (i = 0; i < fingerprint_n; i++) {
+		ret = gen_key_fingerprint(cert, fingerprint_mds[i], key_name_c);
+		if (ret)
+			return ret;
+	}
+
+	fprintf(outfilep, "static struct x509_fingerprint %s_fingerprints[] = {\n",
+		key_name_c);
+
+	for (i = 0; i < fingerprint_n; i++) {
+		md_name = EVP_MD_get0_name(fingerprint_mds[i]);
+
+		fprintf(outfilep,
+			"\t{\n"
+			"\t\t.algo = HASH_ALGO_%s,\n"
+			"\t\t.data = %s_%s_fingerprint,\n"
+			"\t},\n", md_name, key_name_c, md_name);
+	}
+
+	fprintf(outfilep,
+		"\t{ .data = NULL }\n"
+		"};\n\n");
+
+	X509_free(cert);
+	return 0;
+}
+
+static int gen_key_ecdsa(EVP_PKEY *key, X509 *cert,
+			 const char *key_name, const char *key_name_c)
 {
 	char group[128];
 	size_t outlen;
@@ -521,6 +611,12 @@ static int gen_key_ecdsa(EVP_PKEY *key, const char *key_name, const char *key_na
 		fprintf(stderr, "ERROR: generating a dts snippet for ECDSA keys is not yet supported\n");
 		return -EOPNOTSUPP;
 	} else {
+		if (cert) {
+			ret = gen_key_fingerprints(cert, key_name_c);
+			if (ret)
+				return ret;
+		}
+
 		fprintf(outfilep, "\nstatic unsigned char %s_hash[] = {\n\t", key_name_c);
 
 		ret = print_hash(key);
@@ -556,6 +652,8 @@ static int gen_key_ecdsa(EVP_PKEY *key, const char *key_name, const char *key_na
 			fprintf(outfilep, "\t.hash = %s_hash,\n", key_name_c);
 			fprintf(outfilep, "\t.hashlen = %u,\n", SHA256_DIGEST_LENGTH);
 			fprintf(outfilep, "\t.ecdsa = &%s,\n", key_name_c);
+			if (cert && fingerprint_n > 0)
+				fprintf(outfilep, "\t.fingerprints = %s_fingerprints,\n", key_name_c);
 			fprintf(outfilep, "};\n");
 			fprintf(outfilep, "\n");
 			fprintf(outfilep, "const struct public_key *__%s_public_key __ll_elem(.public_keys.rodata.%s) = &%s_public_key;\n", key_name_c, key_name_c, key_name_c);
@@ -583,7 +681,8 @@ static const char *try_resolve_env(const char *input)
 	return var;
 }
 
-static int gen_key_rsa(EVP_PKEY *key, const char *key_name, const char *key_name_c)
+static int gen_key_rsa(EVP_PKEY *key, X509 *cert,
+		       const char *key_name, const char *key_name_c)
 {
 	BIGNUM *modulus, *r_squared;
 	uint64_t exponent = 0;
@@ -619,6 +718,12 @@ static int gen_key_rsa(EVP_PKEY *key, const char *key_name, const char *key_name
 		fprintf(outfilep, "\t\t\tkey-name-hint = \"%s\";\n", key_name_c);
 		fprintf(outfilep, "\t\t};\n");
 	} else {
+		if (cert) {
+			ret = gen_key_fingerprints(cert, key_name_c);
+			if (ret)
+				return ret;
+		}
+
 		fprintf(outfilep, "\nstatic unsigned char %s_hash[] = {\n\t", key_name_c);
 
 		ret = print_hash(key);
@@ -662,6 +767,8 @@ static int gen_key_rsa(EVP_PKEY *key, const char *key_name, const char *key_name
 			fprintf(outfilep, "\t.hash = %s_hash,\n", key_name_c);
 			fprintf(outfilep, "\t.hashlen = %u,\n", SHA256_DIGEST_LENGTH);
 			fprintf(outfilep, "\t.rsa = &%s,\n", key_name_c);
+			if (cert && fingerprint_n > 0)
+				fprintf(outfilep, "\t.fingerprints = %s_fingerprints,\n", key_name_c);
 			fprintf(outfilep, "};\n");
 			fprintf(outfilep, "\n");
 			fprintf(outfilep, "const struct public_key *__%s_public_key __ll_elem(.public_keys.rodata.%s) = &%s_public_key;\n", key_name_c, key_name_c, key_name_c);
@@ -675,6 +782,7 @@ static int gen_key(const char *keyname, const char *path)
 {
 	int ret;
 	EVP_PKEY *key;
+	X509 *cert = NULL;
 	char *tmp, *key_name_c;
 
 	/* key name handling */
@@ -700,18 +808,18 @@ static int gen_key(const char *keyname, const char *path)
 		if (ret)
 			exit(1);
 	} else {
-		ret = pem_get_pub_key(path, &key);
+		ret = pem_get_pub_key(path, &key, &cert);
 		if (ret)
 			exit(1);
 	}
 
 	/* generate built-in keys */
-	ret = gen_key_ecdsa(key, keyname, key_name_c);
+	ret = gen_key_ecdsa(key, cert, keyname, key_name_c);
 	if (ret == -EOPNOTSUPP)
 		return ret;
 
 	if (ret)
-		ret = gen_key_rsa(key, keyname, key_name_c);
+		ret = gen_key_rsa(key, cert, keyname, key_name_c);
 
 	return ret;
 }
@@ -744,6 +852,27 @@ static void get_name_path(const char *keyspec, char **keyname, char **path)
 	free(spec);
 }
 
+static void add_fingerprint(const char *algo)
+{
+	if (!fingerprint_n)
+		OpenSSL_add_all_digests();
+
+	fingerprint_mds = realloc(fingerprint_mds,
+				  (fingerprint_n + 1) * sizeof(*fingerprint_mds));
+	if (!fingerprint_mds) {
+		fprintf(stderr, "ERROR: no memory\n");
+		exit(1);
+	}
+
+	fingerprint_mds[fingerprint_n] = EVP_get_digestbyname(algo);
+	if (!fingerprint_mds[fingerprint_n]) {
+		fprintf(stderr, "ERROR: unknown digest \"%s\"\n", algo);
+		exit(1);
+	}
+
+	fingerprint_n++;
+}
+
 int main(int argc, char *argv[])
 {
 	int i, opt, ret;
@@ -752,13 +881,16 @@ int main(int argc, char *argv[])
 
 	outfilep = stdout;
 
-	while ((opt = getopt(argc, argv, "o:ds")) > 0) {
+	while ((opt = getopt(argc, argv, "o:df:s")) > 0) {
 		switch (opt) {
 		case 'o':
 			outfile = optarg;
 			break;
 		case 'd':
 			dts = 1;
+			break;
+		case 'f':
+			add_fingerprint(optarg);
 			break;
 		case 's':
 			standalone = 1;
@@ -776,9 +908,10 @@ int main(int argc, char *argv[])
 	}
 
 	if (optind == argc) {
-		fprintf(stderr, "Usage: %s [-ods] <key_name_hint>:<crt> ...\n", argv[0]);
+		fprintf(stderr, "Usage: %s [-ods] [-f <algo>] <key_name_hint>:<crt> ...\n", argv[0]);
 		fprintf(stderr, "\t-o FILE\twrite output into FILE instead of stdout\n");
 		fprintf(stderr, "\t-d\tgenerate device tree snippet instead of C code\n");
+		fprintf(stderr, "\t-f\tinclude fingerprint of type <algo> from <crt>, may be used multiple times\n");
 		fprintf(stderr, "\t-s\tgenerate standalone key outside FIT image keyring\n");
 		exit(1);
 	}
