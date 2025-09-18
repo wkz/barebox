@@ -8,6 +8,18 @@
 
 static LIST_HEAD(public_keys);
 
+static unsigned int public_key_num_fingerprints(const struct public_key *key)
+{
+	unsigned int i;
+
+	if (!key->fingerprints)
+		return 0;
+
+	for (i = 0; key->fingerprints[i].data; i++);
+
+	return i;
+}
+
 const struct public_key *public_key_next(const struct public_key *prev)
 {
 	prev = list_prepare_entry(prev, &public_keys, list);
@@ -42,12 +54,19 @@ int public_key_add(struct public_key *key)
 static struct public_key *public_key_dup(const struct public_key *key)
 {
 	struct public_key *k = xzalloc(sizeof(*k));
+	unsigned int nfps;
 
 	k->type = key->type;
 	if (key->key_name_hint)
 		k->key_name_hint = xstrdup(key->key_name_hint);
 	k->hash = xmemdup(key->hash, key->hashlen);
 	k->hashlen = key->hashlen;
+
+	nfps = public_key_num_fingerprints(key);
+	if (nfps) {
+		k->fingerprints = xmemdup(key->fingerprints,
+					  (nfps + 1) * sizeof(*k->fingerprints));
+	}
 
 	switch (key->type) {
 	case PUBLIC_KEY_TYPE_RSA:
