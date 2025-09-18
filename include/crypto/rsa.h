@@ -56,6 +56,8 @@ int rsa_verify(const struct rsa_public_key *key, const uint8_t *sig,
 			  const uint32_t sig_len, const uint8_t *hash,
 			  enum hash_algo algo);
 
+unsigned int rsa_key_bits(struct rsa_public_key *key);
+
 struct rsa_public_key *rsa_key_dup(const struct rsa_public_key *key);
 #else
 static inline int rsa_verify(const struct rsa_public_key *key, const uint8_t *sig,

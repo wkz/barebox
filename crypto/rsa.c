@@ -442,6 +442,11 @@ out:
 	return err ? ERR_PTR(err) : key;
 }
 
+unsigned int rsa_key_bits(struct rsa_public_key *key)
+{
+	return key->len * sizeof(uint32_t) * 8;
+}
+
 void rsa_key_free(struct rsa_public_key *key)
 {
 	free(key->modulus);
