@@ -163,4 +163,13 @@ config CRYPTO_PUBLIC_KEYS
 	  - mykey="myhint:pkcs11:object=foo" (.der could be used too)
 	  - CONFIG_CRYPTO_PUBLIC_KEYS="__ENV__mykey"
 
+config CRYPTO_PUBLIC_KEYS_FINGERPRINT_SHA256
+	depends on CRYPTO_BUILTIN_KEYS
+	depends on HAVE_DIGEST_SHA256
+	bool "record sha256 fingerprint of X509 certs"
+	help
+	  For every builtin key that is derived from an X509
+	  certificate, record the sha256 fingerprint of it along with
+	  the key data.
+
 endmenu
