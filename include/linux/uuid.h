@@ -53,6 +53,21 @@ static inline void guid_copy(guid_t *dst, const guid_t *src)
 	memcpy(dst, src, sizeof(guid_t));
 }
 
+static inline void guid_bswap(guid_t *dst, const guid_t *src)
+{
+	const __u8 *s = src->b;
+
+	*dst = (guid_t) {
+		.b = {
+			s[3], s[2], s[1], s[0],
+			s[5], s[4],
+			s[7], s[6],
+			s[8], s[9],
+			s[10], s[11], s[12], s[13], s[14], s[15],
+		},
+	};
+}
+
 static inline void import_guid(guid_t *dst, const __u8 *src)
 {
 	memcpy(dst, src, sizeof(guid_t));
