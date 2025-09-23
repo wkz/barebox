@@ -79,6 +79,47 @@ static int veritysetup_open(int argc, char *argv[])
 	return COMMAND_SUCCESS;
 }
 
+#if defined(CONFIG_DM_BLK_VERITY_SIG)
+static int veritysetup_dps_open(int argc, char *argv[])
+{
+	char *config, *errmsg;
+	struct dm_device *dm;
+
+	switch (argc) {
+	case 2:
+		config = dm_verity_config_from_dps(argv[0], NULL, NULL, &errmsg);
+		break;
+	case 4:
+		config = dm_verity_config_from_dps(argv[0], argv[2], argv[3], &errmsg);
+		break;
+	default:
+		return COMMAND_ERROR_USAGE;
+	}
+
+	if (IS_ERR(config)) {
+		puts(errmsg); putchar('\n');
+		free(errmsg);
+		return COMMAND_ERROR;
+	}
+
+	dm = dm_create(argv[1], config);
+	free(config);
+	if (IS_ERR_OR_NULL(dm)) {
+		printf("Failed to create %s: %pe\n", argv[1], dm);
+		return COMMAND_ERROR;
+	}
+
+	printf("Created %s\n", argv[1]);
+	return COMMAND_SUCCESS;
+}
+#else
+static int veritysetup_dps_open(int argc, char *argv[])
+{
+	printf("CONFIG_DM_BLK_VERITY_SIG not enabled\n");
+	return COMMAND_ERROR;
+}
+#endif
+
 static int do_veritysetup(int argc, char *argv[])
 {
 	const char *cmd;
@@ -92,6 +133,8 @@ static int do_veritysetup(int argc, char *argv[])
 
 	if (!strcmp(cmd, "open"))
 		return veritysetup_open(argc, argv);
+	else if (!strcmp(cmd, "dps-open"))
+		return veritysetup_dps_open(argc, argv);
 	else if (!strcmp(cmd, "close"))
 		return veritysetup_close(argc, argv);
 	else if (!strcmp(cmd, "dump"))
@@ -109,6 +152,9 @@ BAREBOX_CMD_HELP_TEXT("device, backed by a Merkle tree whose root hash must be")
 BAREBOX_CMD_HELP_TEXT("verified by an externally provided signature")
 BAREBOX_CMD_HELP_TEXT("")
 BAREBOX_CMD_HELP_TEXT("commands:")
+#if defined(CONFIG_DM_BLK_VERITY_SIG)
+BAREBOX_CMD_HELP_OPT("dps-open <data-dev> <name> <hash-dev> <sig-dev>", "Create new device")
+#endif
 BAREBOX_CMD_HELP_OPT("open <data-dev> <name> <hash-dev> <root-hash>", "Create new device")
 BAREBOX_CMD_HELP_OPT("close <name>", "Remove device")
 BAREBOX_CMD_HELP_OPT("dump <hash-dev>", "Dump superblock information")
