@@ -17,5 +17,9 @@ struct dm_device *dm_create(const char *name, const char *ctable);
 char *dm_verity_config_from_sb(const char *data_dev, const char *hash_dev,
 			       const char *root_hash);
 #endif
+#if defined(CONFIG_DM_BLK_VERITY_SIG)
+char *dm_verity_config_from_dps(const char *data_dev, const char *hash_dev,
+				const char *sig_dev, char **errmsg);
+#endif
 
 #endif /* __DM_H */

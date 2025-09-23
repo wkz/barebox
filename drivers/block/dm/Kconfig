@@ -18,3 +18,21 @@ config DM_BLK_VERITY
 	help
 	  Transparent integrity checking of underlying device using a
 	  pre-computed Merkle tree.
+
+config DM_BLK_VERITY_SIG
+	bool "Support validation of UAPI DPS verity signatures"
+	depends on DM_BLK_VERITY
+	select BASE64
+	select CRYPTO_BUILTIN_KEYS
+	select JSMN
+	default y
+	help
+	  Enable support for validating dm-verity signatures according to
+	  the UAPI Group's Discoverable Partitions Specification (DPS).
+	  This allows verification of dm-verity root hashes using
+	  cryptographic signatures embedded in partition metadata.
+
+	  The DPS verity signature format provides a standardized way to
+	  associate cryptographic signatures with dm-verity protected
+	  partitions, enabling secure boot scenarios where partition
+	  integrity must be cryptographically verified.
