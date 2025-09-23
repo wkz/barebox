@@ -38,6 +38,9 @@ const struct public_key *public_key_next(const struct public_key *prev);
 #define for_each_public_key(key) \
 		for (key = public_key_next(NULL); key; key = public_key_next(key))
 
+const struct public_key *public_key_get_by_fingerprint(enum hash_algo algo,
+						       uint8_t *data, size_t dlen);
+
 int public_key_verify(const struct public_key *key, const uint8_t *sig,
 		      const uint32_t sig_len, const uint8_t *hash,
 		      enum hash_algo algo);

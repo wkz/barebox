@@ -41,6 +41,26 @@ const struct public_key *public_key_get(const char *name)
 	return NULL;
 }
 
+const struct public_key *public_key_get_by_fingerprint(enum hash_algo algo,
+						       uint8_t *data, size_t dlen)
+{
+	const struct public_key *key;
+	struct x509_fingerprint *fp;
+
+	list_for_each_entry(key, &public_keys, list) {
+		if (!key->fingerprints)
+			continue;
+
+		for (fp = key->fingerprints; fp->data; fp++) {
+			if ((fp->algo == algo) &&
+			    !memcmp(fp->data, data, dlen))
+				return key;
+		}
+	}
+
+	return NULL;
+}
+
 int public_key_add(struct public_key *key)
 {
 	if (public_key_get(key->key_name_hint))
