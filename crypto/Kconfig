@@ -173,4 +173,6 @@ config CRYPTO_PUBLIC_KEYS
 	  - mykey="keyring=fit,fit-hint=myhint:pkcs11:object=foo" (.der could be used too)
 	  - CONFIG_CRYPTO_PUBLIC_KEYS="__ENV__mykey"
 
+source "crypto/mbedtls/Kconfig"
+
 endmenu

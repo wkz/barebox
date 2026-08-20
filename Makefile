@@ -905,6 +905,7 @@ include-y			:= scripts/Makefile.warn
 include-$(CONFIG_DEBUG_INFO)	+= scripts/Makefile.debug
 include-$(CONFIG_KASAN)		+= scripts/Makefile.kasan
 include-$(CONFIG_UBSAN)		+= scripts/Makefile.ubsan
+include-$(CONFIG_MBEDTLS)	+= crypto/mbedtls/Makefile.mbedtls
 
 include $(addprefix $(srctree)/, $(include-y))
 

@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menuconfig MBEDTLS
+	bool "Mbed TLS"
+	help
+	  Add comprehensive crypto support via the Mbed TLS library.
+
+if MBEDTLS
+
+config MBEDTLS_NEEDS_LIB_TLS
+	bool
+	help
+	  This should be selected by any and all features that depends
+	  on libmbedtls.a being linked in to barebox
+
+config MBEDTLS_NEEDS_LIB_X509
+	bool
+	help
+	  This should be selected by any and all features that depends
+	  on libmbedx509.a being linked in to barebox
+
+config MBEDTLS_SRC
+	string "Source location"
+	default "$(srctree)/../mbedtls"
+	help
+	  Path to a local directory containing the Mbed TLS sources.
+
+config MBEDTLS_PKCS7
+	bool "PKCS#7 Signature Validation"
+	select MBEDTLS_NEEDS_LIB_X509
+	help
+	  Support validating PKCS#7 signatures against X509
+	  certificates.
+
+endif
